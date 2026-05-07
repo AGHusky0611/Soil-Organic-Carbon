@@ -9,7 +9,7 @@ from Models.CLS_extraction import LabColorExtractor
 
 def test_image():
     # 1. Open a Windows File Picker dialog to choose an image
-    Tk().withdraw() # We don't want a full GUI, so keep the root window from appearing
+    Tk().withdraw() 
     image_path = askopenfilename(title="Select a Soil Image to Test", 
                                  filetypes=[("Image Files", "*.jpg *.jpeg *.png")])
     
@@ -32,12 +32,20 @@ def test_image():
     class_names = np.load("soil_classes.npy", allow_pickle=True)
 
     # 4. Process the selected image
-    img = cv2.imread(image_path)
+    # Robust loading for Windows
+    img = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    
+    if img is None:
+        print(f"❌ Error: Could not load image at {image_path}")
+        return
+
     img = cv2.resize(img, (128, 128))
     
+    # --- THESE ARE THE MISSING LINES ---
     calibrated = calibrator.calibrate(img)
     features = extractor.extract_features(calibrated)
-    features_2d = features.reshape(1, -1)
+    features_2d = features.reshape(1, -1) 
+    # -----------------------------------
 
     # 5. Get Prediction and Confidence Score
     probabilities = model.predict_proba(features_2d)
