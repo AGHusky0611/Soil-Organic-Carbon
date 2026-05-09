@@ -3,40 +3,65 @@ import numpy as np
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import mean_squared_error, r2_score
 
 class SoilClassifierXGB:
-    def __init__(self, model_path="soil_xgb_model.json", learning_rate=0.1):
+    def __init__(self, model_path="soil_xgb_model.json"):
+        """Initializes the XGBoost classifier with fixed hyperparameters."""
         self.model_path = model_path
-        self.label_encoder = LabelEncoder()
+        self.encoder = LabelEncoder()
         
-        # We define the model parameters here
+        # Configuration for multi-class probability classification
         self.params = {
-            'n_estimators': 100,
-            'learning_rate': learning_rate,
-            'max_depth': 5,
+            'n_estimators': 150,
+            'learning_rate': 0.1,
+            'max_depth': 6,
+            'subsample': 0.8,
+            'colsample_bytree': 0.8,
             'objective': 'multi:softprob',
-            'eval_metric': 'mlogloss'
+            'eval_metric': 'mlogloss',
+            'random_state': 42
         }
         self.clf = xgb.XGBClassifier(**self.params)
 
-    def train(self, X, y, update_existing=True):
-        y_encoded = self.label_encoder.fit_transform(y)
-        X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.2, random_state=42)
+    def train(self, X, y):
+        """
+        Processes labels and trains the model. 
+        Returns performance metrics based on a 20% test split.
+        """
+        # Transform string labels to numeric indices
+        y_enc = self.encoder.fit_transform(y)
         
-        # Incremental learning: update weights if model exists
-        if update_existing and os.path.exists(self.model_path):
-            self.clf.fit(X_train, y_train, xgb_model=self.model_path)
-        else:
-            self.clf.fit(X_train, y_train)
-            
-        accuracy = self.clf.score(X_test, y_test)
+        # Split data using stratification to maintain class balance in test set
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y_enc, test_size=0.2, random_state=42, stratify=y_enc
+        )
         
+        # Fit the Gradient Boosting model
+        self.clf.fit(X_train, y_train)
+        
+        # Generate predictions for metric calculation
+        y_pred = self.clf.predict(X_test)
+        
+        # Calculate regression and classification metrics
+        results = {
+            "accuracy": self.clf.score(X_test, y_test),
+            "rmse": np.sqrt(mean_squared_error(y_test, y_pred)),
+            "r2": r2_score(y_test, y_pred),
+            "learning_rate": self.params['learning_rate'],
+            "max_depth": self.params['max_depth'],
+            "n_estimators": self.params['n_estimators'],
+            "subsample": self.params['subsample']
+        }
+        
+        # Persist the model and class mapping
         self.clf.save_model(self.model_path)
-        np.save("soil_classes.npy", self.label_encoder.classes_)
+        np.save("soil_classes.npy", self.encoder.classes_)
         
-        return accuracy
+        return results
 
-    def update_learning_rate(self, new_lr):
-        """Allows the manager to decay the learning rate to improve fine-tuning."""
-        self.params['learning_rate'] = new_lr
+    def update_params(self, new_lr=None, new_depth=None):
+        """Updates internal parameters for next training session."""
+        if new_lr: self.params['learning_rate'] = new_lr
+        if new_depth: self.params['max_depth'] = new_depth
         self.clf = xgb.XGBClassifier(**self.params)

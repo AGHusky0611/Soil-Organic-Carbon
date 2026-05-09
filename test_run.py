@@ -2,73 +2,70 @@ import cv2
 import numpy as np
 import os
 import xgboost as xgb
-from tkinter import Tk
-from tkinter.filedialog import askopenfilename
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from PIL import Image, ImageTk
 from Models.SVM_Calibrator import SoilCalibratorSVM
 from Models.CLS_extraction import LabColorExtractor
 
-def test_image():
-    # 1. Open a Windows File Picker dialog to choose an image
-    Tk().withdraw() 
-    image_path = askopenfilename(title="Select a Soil Image to Test", 
-                                 filetypes=[("Image Files", "*.jpg *.jpeg *.png")])
-    
-    if not image_path:
-        print("No image selected. Exiting...")
-        return
+class SoilApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Soil Carbon Analysis")
+        self.root.geometry("500x700")
+        self.root.configure(bg="#2c3e50")
 
-    print(f"\n🔍 Analyzing: {os.path.basename(image_path)}...")
+        self.calibrator = SoilCalibratorSVM()
+        self.extractor = LabColorExtractor()
+        self.model = xgb.XGBClassifier()
+        
+        if os.path.exists("soil_xgb_model.json"):
+            self.model.load_model("soil_xgb_model.json")
+            self.classes = np.load("soil_classes.npy", allow_pickle=True)
+        
+        self.setup_ui()
 
-    # 2. Check if the AI brain exists
-    if not os.path.exists("soil_xgb_model.json"):
-        print("❌ Error: You need to run run.py to train the model first!")
-        return
+    def setup_ui(self):
+        tk.Label(self.root, text="SOIL ANALYSIS SYSTEM", font=("Arial", 16, "bold"), bg="#2c3e50", fg="white").pack(pady=20)
+        self.display = tk.Label(self.root, bg="#34495e", width=40, height=15)
+        self.display.pack(pady=10)
+        
+        tk.Button(self.root, text="LOAD IMAGE", command=self.load_img, width=20).pack(pady=5)
+        tk.Button(self.root, text="ANALYZE", command=self.process, width=20, bg="#27ae60", fg="white").pack(pady=5)
+        
+        self.res_text = tk.Label(self.root, text="Result: ---", font=("Arial", 14), bg="#2c3e50", fg="white")
+        self.res_text.pack(pady=20)
+        self.img_path = None
 
-    # 3. Load Modules & AI Model
-    calibrator = SoilCalibratorSVM()
-    extractor = LabColorExtractor()
-    model = xgb.XGBClassifier()
-    model.load_model("soil_xgb_model.json")
-    class_names = np.load("soil_classes.npy", allow_pickle=True)
+    def load_img(self):
+        path = filedialog.askopenfilename()
+        if path:
+            self.img_path = path
+            img = Image.open(path).resize((300, 250))
+            img_tk = ImageTk.PhotoImage(img)
+            self.display.config(image=img_tk)
+            self.display.image = img_tk
 
-    # 4. Process the selected image
-    # Robust loading for Windows
-    img = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
-    
-    if img is None:
-        print(f"❌ Error: Could not load image at {image_path}")
-        return
+    def process(self):
+        if not self.img_path: return
+        raw = np.fromfile(self.img_path, dtype=np.uint8)
+        img = cv2.imdecode(raw, cv2.IMREAD_COLOR)
+        
+        resized = cv2.resize(img, (128, 128))
+        calibrated = self.calibrator.calibrate(resized)
+        features = self.extractor.extract_features(calibrated).reshape(1, -1)
+        
+        probs = self.model.predict_proba(features)
+        conf = np.max(probs)
+        pred = self.classes[np.argmax(probs)]
 
-    img = cv2.resize(img, (128, 128))
-    
-    # --- THESE ARE THE MISSING LINES ---
-    calibrated = calibrator.calibrate(img)
-    features = extractor.extract_features(calibrated)
-    features_2d = features.reshape(1, -1) 
-    # -----------------------------------
-
-    # 5. Get Prediction and Confidence Score
-    probabilities = model.predict_proba(features_2d)
-    max_confidence = np.max(probabilities)
-    best_guess_index = np.argmax(probabilities)
-    result = class_names[best_guess_index]
-
-    # 6. Your Custom Output Logic
-    print("=========================================")
-    if max_confidence < 0.50:
-        print("Name of soil: Unknown")
-        print(f"(Confidence was too low: {max_confidence*100:.2f}%)")
-    elif result == "Noise":
-        print("Name of soil: Invalid")
-        print("(Not a soil or heavy interference detected)")
-    else:
-        print(f"Name of soil: {result}")
-        print(f"(Confidence: {max_confidence*100:.2f}%)")
-    print("=========================================\n")
+        # Rejection logic for non-soil or low confidence
+        if pred == "Not_Soil" or conf < 0.75:
+            self.res_text.config(text="REJECTED: NOT SOIL", fg="#e74c3c")
+        else:
+            self.res_text.config(text=f"{pred} ({conf*100:.1f}%)", fg="#2ecc71")
 
 if __name__ == "__main__":
-    while True:
-        test_image()
-        again = input("Do you want to test another image? (y/n): ")
-        if again.lower() != 'y':
-            break
+    root = tk.Tk()
+    SoilApp(root)
+    root.mainloop()
