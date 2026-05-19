@@ -16,8 +16,16 @@ class SoilClassifierXGB:
             'n_estimators': 150,
             'learning_rate': 0.1,
             'max_depth': 6,
-            'subsample': 0.8,
-            'colsample_bytree': 0.8,
+            
+            # --- FEATURE & ROW DROPOUT ---
+            'subsample': 0.8,         # Drops 20% of images per tree
+            'colsample_bytree': 0.8,  # Drops 20% of math features per tree
+            
+            # --- THE TRUE DROPOUT METHOD (TEACHER'S REQUEST) ---
+            'booster': 'dart',        # Activates DART (Dropout Architecture)
+            'rate_drop': 0.1,         # Randomly drops 10% of previous trees 
+            'skip_drop': 0.5,         # 50% chance to skip dropout in an iteration
+            
             'objective': 'multi:softprob',
             'eval_metric': 'mlogloss',
             'random_state': 42
@@ -29,21 +37,15 @@ class SoilClassifierXGB:
         Processes labels and trains the model. 
         Returns performance metrics based on a 20% test split.
         """
-        # Transform string labels to numeric indices
         y_enc = self.encoder.fit_transform(y)
         
-        # Split data using stratification to maintain class balance in test set
         X_train, X_test, y_train, y_test = train_test_split(
             X, y_enc, test_size=0.2, random_state=42, stratify=y_enc
         )
         
-        # Fit the Gradient Boosting model
         self.clf.fit(X_train, y_train)
-        
-        # Generate predictions for metric calculation
         y_pred = self.clf.predict(X_test)
         
-        # Calculate regression and classification metrics
         results = {
             "accuracy": self.clf.score(X_test, y_test),
             "rmse": np.sqrt(mean_squared_error(y_test, y_pred)),
@@ -54,14 +56,12 @@ class SoilClassifierXGB:
             "subsample": self.params['subsample']
         }
         
-        # Persist the model and class mapping
         self.clf.save_model(self.model_path)
         np.save("soil_classes.npy", self.encoder.classes_)
         
         return results
 
     def update_params(self, new_lr=None, new_depth=None):
-        """Updates internal parameters for next training session."""
         if new_lr: self.params['learning_rate'] = new_lr
         if new_depth: self.params['max_depth'] = new_depth
         self.clf = xgb.XGBClassifier(**self.params)

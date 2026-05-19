@@ -22,58 +22,59 @@ class DatasetBalancer:
             return cv2.warpAffine(img, M, self.img_size)
         return img
 
-    def fill_not_soil_from_imagenet(self, imagenet_path):
-        not_soil_path = os.path.join(self.research_data, "Not_Soil")
-        if not os.path.exists(not_soil_path):
-            os.makedirs(not_soil_path)
-
-        existing_count = len(os.listdir(not_soil_path))
-        needed = self.target_count - existing_count
-        if needed <= 0:
-            return
-
-        all_available_images = []
-        for root, _, files in os.walk(imagenet_path):
-            for f in files:
-                if f.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    all_available_images.append(os.path.join(root, f))
-
-        if not all_available_images:
-            return
-
-        random.shuffle(all_available_images)
-        selected_samples = all_available_images[:needed]
-
-        for i, src_path in enumerate(selected_samples):
-            img = cv2.imread(src_path)
-            if img is not None:
-                img = cv2.resize(img, self.img_size)
-                cv2.imwrite(os.path.join(not_soil_path, f"imgnet_sample_{uuid.uuid4().hex[:8]}.jpg"), img)
-
-    def balance_soil_folders(self):
+    def process_and_balance_all(self):
+        """Universal balancer that flattens, trims, and augments ALL folders equally."""
         for folder in os.listdir(self.research_data):
-            # FIX 1: Ignore case sensitivity!
-            if folder.lower() == "not_soil": continue
             f_path = os.path.join(self.research_data, folder)
             if not os.path.isdir(f_path): continue
 
-            # FIX 2: Only rename FILES, completely ignore sub-directories
+            print(f"\n🔄 Processing folder: '{folder}'...")
+
+            # 1. FLATTEN SUBFOLDERS
+            for item in os.listdir(f_path):
+                item_path = os.path.join(f_path, item)
+                if os.path.isdir(item_path):
+                    print(f"   📂 Flattening sub-folder: '{item}'...")
+                    for img_file in os.listdir(item_path):
+                        src = os.path.join(item_path, img_file)
+                        if os.path.isfile(src):
+                            dst = os.path.join(f_path, f"{item}_{img_file}")
+                            shutil.move(src, dst)
+                    try:
+                        os.rmdir(item_path)
+                    except OSError:
+                        pass
+
+            # 2. COUNT AND TRIM EXCESS FIRST (Massive Speedup!)
+            current_files = [f for f in os.listdir(f_path) if os.path.isfile(os.path.join(f_path, f))]
+            if len(current_files) > self.target_count:
+                excess = len(current_files) - self.target_count
+                print(f"   ✂️ Too many images! Randomly trimming {excess} images to reach {self.target_count}...")
+                to_delete = random.sample(current_files, excess)
+                for f in to_delete:
+                    try:
+                        os.remove(os.path.join(f_path, f))
+                    except FileNotFoundError:
+                        pass
+
+            # 3. STANDARDIZE NAMES (Only renames the remaining 600 files)
             files = [f for f in os.listdir(f_path) if os.path.isfile(os.path.join(f_path, f)) and not f.startswith('aug_')]
+            safe_idx = 0 # Moved outside the loop to stop it from resetting to 0!
             for f in files:
                 if not f.startswith('orig_'):
-                    safe_idx = 0
                     while os.path.exists(os.path.join(f_path, f"orig_{safe_idx}.jpg")):
                         safe_idx += 1
                     os.rename(os.path.join(f_path, f), os.path.join(f_path, f"orig_{safe_idx}.jpg"))
 
+            # 4. AUGMENT SHORTAGES
             current_files = [f for f in os.listdir(f_path) if os.path.isfile(os.path.join(f_path, f))]
             if len(current_files) < self.target_count:
                 needed = self.target_count - len(current_files)
-                print(f"⚖️ Balancing '{folder}': Generating {needed} new images...")
+                print(f"   ⚖️ Balancing: Generating {needed} new augmented images...")
                 
                 originals = [f for f in os.listdir(f_path) if f.startswith('orig_')]
                 if not originals:
-                    print(f"⚠️ Warning: No original images found in {folder} to augment!")
+                    print(f"   ⚠️ Warning: No original images found to augment!")
                     continue
                     
                 for _ in range(needed):
@@ -84,16 +85,6 @@ class DatasetBalancer:
                         cv2.imwrite(os.path.join(f_path, f"aug_{unique_id}.jpg"), self.augment_image(img))
 
 if __name__ == "__main__":
-    # FIX 3: Make sure this points to your massive backup folder OUTSIDE of ResearchData!
-    # DO NOT point this to "./ResearchData/not_soil"
-    IMAGENET_SOURCE = r"C:\Users\D524-PC\Desktop\Raw_ImageNet_Backup" 
-    
-    balancer = DatasetBalancer()
-    
-    if os.path.exists(IMAGENET_SOURCE):
-        balancer.fill_not_soil_from_imagenet(IMAGENET_SOURCE)
-    else:
-        print(f"⚠️ Could not find ImageNet backup at {IMAGENET_SOURCE}")
-    
-    balancer.balance_soil_folders()
-    print("✅ All folders are now perfectly balanced to 600 images!")
+    balancer = DatasetBalancer(target_count=600)
+    balancer.process_and_balance_all()
+    print("\n✅ All folders are now flattened, cleaned, and perfectly balanced to 600 images!")
