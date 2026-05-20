@@ -4,7 +4,7 @@ import shutil
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from ClassificationModels.SVM_Calibrator import SoilCalibratorSVM
+from ClassificationModels.SVM_Calibrator import SoilCalibratorSVM, SoilClassifierSVM
 from ClassificationModels.CLS_extraction import LabColorExtractor
 from ClassificationModels.XGB_Classification import SoilClassifierXGB
 
@@ -13,29 +13,48 @@ class TrainingManager:
         self.data_dir = data_dir
         self.log_file = log_file
         self.img_size = (128, 128)
-        self.calibrator = SoilCalibratorSVM()
+        self.svm_classifier = SoilClassifierSVM()
         self.extractor = LabColorExtractor()
         self.classifier = SoilClassifierXGB()
+        self.calibrator = SoilCalibratorSVM()
 
     def reset_artifacts(self):
         """Removes previous model and feature files for clean training."""
         for f in ["soil_xgb_model.json", "soil_classes.npy", "extracted_features.npy", "extracted_labels.npy"]:
             if os.path.exists(f): os.remove(f)
 
-    def process_balanced_dataset(self):
-        """Extracts features from all folders in ResearchData."""
-        X, y = [], []
+    def process_balanced_dataset(self, allowed_exts=(".jpg", ".jpeg", ".png", ".bmp")):
+        """Extracts features with class balancing and basic file filtering."""
+        class_files = {}
         for class_name in os.listdir(self.data_dir):
             c_path = os.path.join(self.data_dir, class_name)
             if os.path.isdir(c_path):
-                for f in os.listdir(c_path):
-                    img = cv2.imread(os.path.join(c_path, f))
-                    if img is not None:
-                        img = cv2.resize(img, self.img_size)
-                        calibrated = self.calibrator.calibrate(img)
-                        features = self.extractor.extract_features(calibrated)
-                        X.append(features)
-                        y.append(class_name)
+                files = [
+                    os.path.join(c_path, f)
+                    for f in os.listdir(c_path)
+                    if f.lower().endswith(allowed_exts)
+                ]
+                if files:
+                    class_files[class_name] = files
+
+        if not class_files:
+            return np.array([]), np.array([])
+
+        # Balance by downsampling to the smallest class
+        min_count = min(len(files) for files in class_files.values())
+        X, y = [], []
+        for class_name, files in class_files.items():
+            sampled = np.random.choice(files, min_count, replace=False)
+            for fpath in sampled:
+                img = cv2.imread(fpath)
+                if img is None:
+                    continue
+                img = cv2.resize(img, self.img_size)
+                calibrated = self.calibrator.calibrate(img)
+                features = self.extractor.extract_features(calibrated)
+                X.append(features)
+                y.append(class_name)
+
         return np.array(X), np.array(y)
 
     def log_to_excel(self, data):
@@ -59,8 +78,8 @@ class TrainingManager:
             "Duration": str(end - start),
             "Samples": len(X),
             "Accuracy": round(results['accuracy'], 4),
-            "RMSE": round(results['rmse'], 4),
-            "R2": round(results['r2'], 4)
+            "Macro F1": round(results['macro_f1'], 4),
+            "Weighted F1": round(results['weighted_f1'], 4)
         }
         self.log_to_excel(log)
 
@@ -69,9 +88,27 @@ class TrainingManager:
         print("-"*50)
         print(f"Total Samples: {len(X)}")
         print(f"Accuracy:      {results['accuracy']*100:.2f}%")
-        print(f"RMSE:          {results['rmse']:.4f}")
-        print(f"R2 Score:      {results['r2']:.4f}")
+        print(f"Macro F1:      {results['macro_f1']:.4f}")
+        print(f"Weighted F1:   {results['weighted_f1']:.4f}")
         print("="*50 + "\n")
+
+        conf_mat = results.get("confusion_matrix")
+        class_names = results.get("class_names")
+
+        if conf_mat is not None and class_names is not None:
+            print("\nConfusion Matrix:")
+            header = " " * 12 + " ".join(f"{name:>10}" for name in class_names)
+            print(header)
+            for i, row in enumerate(conf_mat):
+                row_str = " ".join(f"{val:>10d}" for val in row)
+                print(f"{class_names[i]:>10}  {row_str}")
+
+
+            df_cm = pd.DataFrame(conf_mat, index=class_names, columns=class_names)
+            df_cm.to_excel("confusion_matrix.xlsx", index=True)
+
+        self.svm_classifier.train(X, y)
+        print("SVM model trained and saved to soil_svm.pkl")
 
 if __name__ == "__main__":
     TrainingManager().execute()
