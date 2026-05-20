@@ -11,7 +11,7 @@ from sklearn.model_selection import ParameterGrid, train_test_split
 
 DEFAULT_MODEL_PATH = "soc_xgb_model.json"
 DEFAULT_META_PATH = "soc_xgb_meta.json"
-DEFAULT_IMAGE_SIZE = (32, 32)
+DEFAULT_IMAGE_SIZE = (64, 64)
 
 
 def extract_soil_features(img):
@@ -28,7 +28,7 @@ def preprocess_soc_image(img_bgr, image_size):
     return cv2.equalizeHist(gray)
 
 
-def calculate_acceptance_accuracy(y_true, y_pred, tolerance=0.005):
+def calculate_acceptance_accuracy(y_true, y_pred, tolerance=0.05):
     """Calculates the percentage of predictions within +/- 5% error."""
     relative_error = np.abs((y_true - y_pred) / (y_true + 1e-7))
     return np.mean(relative_error <= tolerance) * 100
@@ -90,7 +90,7 @@ class SOCXGBPredictor:
 def train_xgb_soc(
     csv_path="SOCDataset/carbon.csv",
     image_dir="SOCDataset/soil images/",
-    image_sizes=None,
+    image_sizes=[(64, 64)],
     param_grid=None,
     model_path=DEFAULT_MODEL_PATH,
     meta_path=DEFAULT_META_PATH,
@@ -100,14 +100,22 @@ def train_xgb_soc(
 
     if param_grid is None:
         param_grid = {
-            "learning_rate": [0.5],
-            "max_depth": [8],
-            "subsample": [0.5],
-            "rate_drop": [0.2],
-            "skip_drop": [0.3],
+            "learning_rate": [0.01, 0.02, 0.03],
+            "max_depth": [2, 3, 4],
+            "subsample": [0.9, 1.0],
+            "colsample_bytree": [0.5, 0.6, 0.7],
+            "min_child_weight": [3, 5, 7],
+            "reg_lambda": [1.0],
         }
 
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, usecols=["Organic carbon", "image_number"])
+    df.columns = df.columns.str.strip()
+    df["Organic carbon"] = pd.to_numeric(df["Organic carbon"], errors="coerce")
+    df["image_number"] = df["image_number"].astype(str).str.strip()
+    df = df.dropna(subset=["Organic carbon", "image_number"])
+
+    print(df["Organic carbon"].describe())
+
     all_results = []
     best_score = -1.0
     best_model = None
@@ -129,10 +137,8 @@ def train_xgb_soc(
                 original_count += 1
                 img = cv2.resize(img, size)
                 img = cv2.equalizeHist(img)
-
-                for aug_img in get_augmented_images(img):
-                    X.append(extract_soil_features(aug_img))
-                    y.append(row["Organic carbon"])
+                X.append(extract_soil_features(img))
+                y.append(row["Organic carbon"])
 
         X, y = np.array(X), np.array(y)
         X_train, X_test, y_train, y_test = train_test_split(
@@ -153,15 +159,11 @@ def train_xgb_soc(
             )
 
             model = xgb.XGBRegressor(
-                n_estimators=1500,
+                n_estimators=500,
                 **params,
-                colsample_bytree=0.8,
                 random_state=42,
-                booster="dart",
+                booster="gbtree",
                 tree_method="hist",
-                device="cuda",
-                sample_type="uniform",
-                normalize_type="tree",
                 eval_metric="rmse",
                 callbacks=[es_callback],
             )
@@ -184,14 +186,14 @@ def train_xgb_soc(
             r2_gap = train_r2 - test_r2
             rmse_test = np.sqrt(mean_squared_error(y_test, test_preds))
             acc_5_pct = calculate_acceptance_accuracy(
-                y_test, test_preds, tolerance=0.005
+                y_test, test_preds, tolerance=0.05
             )
 
             print(
                 f"   -> Results | Test R2: {test_r2:.4f} | Overfit Gap: {r2_gap:.4f}"
             )
             print(
-                f"   -> Metrics | Test RMSE: {rmse_test:.4f} | 0.5% Tolerance Accuracy: {acc_5_pct:.2f}%"
+                f"   -> Metrics | Test RMSE: {rmse_test:.4f} | 5% Tolerance Accuracy: {acc_5_pct:.2f}%"
             )
             print(
                 f"   -> Stopping | Converged at Epoch: {best_epoch} | Duration: {duration:.2f}s"
