@@ -88,8 +88,8 @@ class SOCXGBPredictor:
 
 
 def train_xgb_soc(
-    csv_path="SOC Dataset/carbon.csv",
-    image_dir="SOC Dataset/soil images/",
+    csv_path="SOCDataset/carbon.csv",
+    image_dir="SOCDataset/soil images/",
     image_sizes=None,
     param_grid=None,
     model_path=DEFAULT_MODEL_PATH,
