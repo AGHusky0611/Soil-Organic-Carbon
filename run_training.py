@@ -4,9 +4,9 @@ import shutil
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from Models.SVM_Calibrator import SoilCalibratorSVM
-from Models.CLS_extraction import LabColorExtractor
-from Models.XGB_Classification import SoilClassifierXGB
+from ClassificationModels.SVM_Calibrator import SoilCalibratorSVM
+from ClassificationModels.CLS_extraction import LabColorExtractor
+from ClassificationModels.XGB_Classification import SoilClassifierXGB
 
 class TrainingManager:
     def __init__(self, data_dir="ResearchData", log_file="training_history.xlsx"):

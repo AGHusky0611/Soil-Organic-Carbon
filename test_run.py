@@ -5,8 +5,9 @@ import xgboost as xgb
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
-from Models.SVM_Calibrator import SoilCalibratorSVM
-from Models.CLS_extraction import LabColorExtractor
+from ClassificationModels.SVM_Calibrator import SoilCalibratorSVM
+from ClassificationModels.CLS_extraction import LabColorExtractor
+from SOCModels.XGBoost_SOC import SOCXGBPredictor
 
 class SoilApp:
     def __init__(self, root):
@@ -18,10 +19,16 @@ class SoilApp:
         self.calibrator = SoilCalibratorSVM()
         self.extractor = LabColorExtractor()
         self.model = xgb.XGBClassifier()
+        self.soc_predictor = None
         
         if os.path.exists("soil_xgb_model.json"):
             self.model.load_model("soil_xgb_model.json")
             self.classes = np.load("soil_classes.npy", allow_pickle=True)
+        if os.path.exists("soc_xgb_model.json"):
+            try:
+                self.soc_predictor = SOCXGBPredictor()
+            except Exception as exc:
+                messagebox.showwarning("SOC Model", f"SOC model load failed: {exc}")
         
         self.setup_ui()
 
@@ -63,7 +70,13 @@ class SoilApp:
         if pred == "Not_Soil" or conf < 0.75:
             self.res_text.config(text="REJECTED: NOT SOIL", fg="#e74c3c")
         else:
-            self.res_text.config(text=f"{pred} ({conf*100:.1f}%)", fg="#2ecc71")
+            soc_text = "SOC: model not loaded"
+            if self.soc_predictor is not None:
+                soc_value = self.soc_predictor.predict_image(img)
+                soc_text = f"SOC: {soc_value:.4f}"
+            self.res_text.config(
+                text=f"{pred} ({conf*100:.1f}%)\n{soc_text}", fg="#2ecc71"
+            )
 
 if __name__ == "__main__":
     root = tk.Tk()
