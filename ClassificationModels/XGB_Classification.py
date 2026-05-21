@@ -45,6 +45,8 @@ class SoilClassifierXGB:
             X, y_enc, test_size=0.2, random_state=42, stratify=y_enc
         )
         
+        print(f"[XGB] Train size: {len(X_train)} | Test size: {len(X_test)}")
+        
         self.clf.fit(X_train, y_train)
         y_pred = self.clf.predict(X_test)
         
@@ -77,6 +79,8 @@ class SoilClassifierXGB:
             "n_estimators": results["n_estimators"],
             "subsample": results["subsample"]
         }]).to_excel("xgb_classification_train_results.xlsx", index=False)
+
+        print("[XGB] Training complete")
 
         return results
 
@@ -127,6 +131,9 @@ def tune_xgb_classification(
         "random_state": random_state,
     }
 
+
+    print(f"[TUNE] Total configs: {len(list(ParameterGrid(param_grid)))}")
+
     best_score = -1.0
     best_model = None
     best_params = None
@@ -135,13 +142,13 @@ def tune_xgb_classification(
     results = []
 
     for params in ParameterGrid(param_grid):
+        print(f"[TUNE] Running params: {params}")
         model = xgb.XGBClassifier(**base_params, **params)
         model.fit(
             X_train,
             y_train,
             eval_set=[(X_train, y_train), (X_test, y_test)],
             verbose=False,
-            early_stopping_rounds=30,
         )
 
         preds = model.predict(X_test)
@@ -168,6 +175,8 @@ def tune_xgb_classification(
             }
         )
 
+        print(f"[XGB] Accuracy: {acc:.4f} | Macro F1: {macro_f1:.4f} | Weighted F1: {weighted_f1:.4f}")
+
         if macro_f1 > best_score:
             best_score = macro_f1
             best_model = model
@@ -191,6 +200,8 @@ def tune_xgb_classification(
         )
         df_cm.to_excel(confusion_path, index=True)
 
+
+    print(f"[TUNE] New best Macro F1: {best_score:.4f}")
 
     return {
         "best_params": best_params,

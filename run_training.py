@@ -26,6 +26,7 @@ class TrainingManager:
 
     def process_balanced_dataset(self, allowed_exts=(".jpg", ".jpeg", ".png", ".bmp")):
         """Extracts features with class balancing and basic file filtering."""
+        print(f"[DATA] Scanning dataset folder: {self.data_dir}")
         class_files = {}
         for class_name in os.listdir(self.data_dir):
             c_path = os.path.join(self.data_dir, class_name)
@@ -43,8 +44,10 @@ class TrainingManager:
 
         # Balance by downsampling to the smallest class
         min_count = min(len(files) for files in class_files.values())
+        print(f"[DATA] Balancing to {min_count} samples per class")
         X, y = [], []
         for class_name, files in class_files.items():
+            print(f"[DATA] Processing class '{class_name}' ({len(files)} files)")
             sampled = np.random.choice(files, min_count, replace=False)
             for fpath in sampled:
                 img = cv2.imread(fpath)
@@ -56,6 +59,7 @@ class TrainingManager:
                 X.append(features)
                 y.append(class_name)
 
+        print(f"[DATA] Final dataset size: {len(X)} samples")
         return np.array(X), np.array(y)
 
     def log_to_excel(self, data):
@@ -124,11 +128,16 @@ class TrainingManager:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--tune-xgb",
-        action="store_true",
-        help="Run XGBoost classification parameter tuning",
-    )
+    parser.add_argument("--tune-xgb", action="store_true", help="Run XGB hyperparameter tuning")
     args = parser.parse_args()
 
-    TrainingManager().execute(tune_xgb=args.tune_xgb)
+    if args.tune_xgb:
+        # You need to load or build X, y here, same as in training
+        tm = TrainingManager()
+        X, y = tm.process_balanced_dataset()
+        if len(X) == 0:
+            print("No data found.")
+        else:
+            tune_xgb_classification(X, y)
+    else:
+        TrainingManager().execute()

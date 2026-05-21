@@ -1,0 +1,57 @@
+{
+  "AlluvailSoil": {
+    "precision": 0.9736842105263158,
+    "recall": 0.9327731092436975,
+    "f1-score": 0.9527896995708155,
+    "support": 119.0
+  },
+  "AridSoil": {
+    "precision": 0.9047619047619048,
+    "recall": 0.957983193277311,
+    "f1-score": 0.9306122448979591,
+    "support": 119.0
+  },
+  "BlackSoil": {
+    "precision": 0.9916666666666667,
+    "recall": 0.9916666666666667,
+    "f1-score": 0.9916666666666667,
+    "support": 120.0
+  },
+  "LateriteSoil": {
+    "precision": 0.940677966101695,
+    "recall": 0.925,
+    "f1-score": 0.9327731092436975,
+    "support": 120.0
+  },
+  "RedSoil": {
+    "precision": 0.9435483870967742,
+    "recall": 0.975,
+    "f1-score": 0.9590163934426229,
+    "support": 120.0
+  },
+  "YellowSoil": {
+    "precision": 0.959349593495935,
+    "recall": 0.9833333333333333,
+    "f1-score": 0.9711934156378601,
+    "support": 120.0
+  },
+  "not_soil": {
+    "precision": 0.9734513274336283,
+    "recall": 0.9166666666666666,
+    "f1-score": 0.944206008583691,
+    "support": 120.0
+  },
+  "accuracy": 0.954653937947494,
+  "macro avg": {
+    "precision": 0.95530572229756,
+    "recall": 0.9546318527410964,
+    "f1-score": 0.9546082197204733,
+    "support": 838.0
+  },
+  "weighted avg": {
+    "precision": 0.9553441057454202,
+    "recall": 0.954653937947494,
+    "f1-score": 0.9546390246070748,
+    "support": 838.0
+  }
+}
