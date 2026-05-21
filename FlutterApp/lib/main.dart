@@ -3,10 +3,15 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 enum AnalyzeMode { combined, classification, soc }
+
+const _defaultApiBaseUrl = 'http://10.0.2.2:8000';
+const _prefsKeyApiBaseUrl = 'api_base_url';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,10 +23,23 @@ class SoilApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = ColorScheme.fromSeed(seedColor: Colors.green);
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: const Color(0xFF2E7D5C),
+      brightness: Brightness.light,
+    );
+    final textTheme = GoogleFonts.spaceGroteskTextTheme();
     return MaterialApp(
       title: 'Soil Organic Carbon',
-      theme: ThemeData(colorScheme: colorScheme, useMaterial3: true),
+      theme: ThemeData(
+        colorScheme: colorScheme,
+        textTheme: textTheme,
+        useMaterial3: true,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          centerTitle: false,
+        ),
+      ),
       home: const SoilHomePage(),
     );
   }
@@ -36,7 +54,7 @@ class SoilHomePage extends StatefulWidget {
 
 class _SoilHomePageState extends State<SoilHomePage> {
   final _picker = ImagePicker();
-  final _apiController = TextEditingController(text: 'http://10.0.2.2:8000');
+  final _apiController = TextEditingController(text: _defaultApiBaseUrl);
 
   AnalyzeMode _mode = AnalyzeMode.combined;
   File? _imageFile;
@@ -45,9 +63,72 @@ class _SoilHomePageState extends State<SoilHomePage> {
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    _loadApiBaseUrl();
+  }
+
+  @override
   void dispose() {
     _apiController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadApiBaseUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_prefsKeyApiBaseUrl);
+    if (saved != null && saved.trim().isNotEmpty) {
+      _apiController.text = saved.trim();
+    } else {
+      _apiController.text = _defaultApiBaseUrl;
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _saveApiBaseUrl(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsKeyApiBaseUrl, value);
+  }
+
+  Future<void> _showApiSettingsDialog() async {
+    final controller = TextEditingController(text: _apiController.text);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('API Endpoint'),
+          content: TextField(
+            controller: controller,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: 'Base URL',
+              helperText: 'Example: http://192.168.1.50:8000',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result == null || result.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _apiController.text = result;
+    });
+    await _saveApiBaseUrl(result);
   }
 
   Future<void> _pickImage() async {
@@ -104,6 +185,8 @@ class _SoilHomePageState extends State<SoilHomePage> {
       });
       return;
     }
+
+    await _saveApiBaseUrl(baseUrl);
 
     setState(() {
       _isLoading = true;
