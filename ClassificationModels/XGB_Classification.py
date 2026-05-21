@@ -68,6 +68,17 @@ class SoilClassifierXGB:
         self.clf.save_model(self.model_path)
         np.save("soil_classes.npy", self.encoder.classes_)
         
+        
+    pd.DataFrame([{
+            "accuracy": results["accuracy"],
+            "macro_f1": results["macro_f1"],
+            "weighted_f1": results["weighted_f1"],
+            "learning_rate": results["learning_rate"],
+            "max_depth": results["max_depth"],
+            "n_estimators": results["n_estimators"],
+            "subsample": results["subsample"]
+        }]).to_excel("xgb_classification_train_results.xlsx", index=False)
+
         return results
 
     def update_params(self, new_lr=None, new_depth=None):
@@ -180,6 +191,7 @@ def tune_xgb_classification(
             best_confusion, index=encoder.classes_, columns=encoder.classes_
         )
         df_cm.to_excel(confusion_path, index=True)
+
 
     return {
         "best_params": best_params,
