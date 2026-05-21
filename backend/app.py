@@ -6,6 +6,7 @@ import numpy as np
 import xgboost as xgb
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from supabase import create_client
 
 from ClassificationModels.CLS_extraction import LabColorExtractor
 from ClassificationModels.SVM_Calibrator import SoilCalibratorSVM
@@ -21,6 +22,9 @@ SOIL_CLASSES_PATH = os.getenv(
 SOC_MODEL_PATH = os.getenv("SOC_MODEL_PATH", os.path.join(ROOT_DIR, "soc_xgb_model.json"))
 SOC_META_PATH = os.getenv("SOC_META_PATH", os.path.join(ROOT_DIR, "soc_xgb_meta.json"))
 CONF_THRESHOLD = float(os.getenv("SOIL_CONF_THRESHOLD", "0.75"))
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_TABLE = os.getenv("SUPABASE_TABLE", "analysis_history")
 
 app = FastAPI(title="Soil Organic Carbon API", version="0.1.0")
 app.add_middleware(
@@ -36,6 +40,7 @@ extractor = LabColorExtractor()
 soil_model = xgb.XGBClassifier()
 soil_classes: np.ndarray | None = None
 soc_predictor: SOCXGBPredictor | None = None
+supabase_client = None
 
 
 def _load_soil_models() -> bool:
@@ -62,6 +67,15 @@ def _load_soc_model() -> bool:
         return False
 
     return True
+
+
+def _init_supabase() -> None:
+    global supabase_client
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        supabase_client = None
+        return
+
+    supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
 def _decode_image(data: bytes) -> np.ndarray:
@@ -99,6 +113,30 @@ def _soc_payload(img: np.ndarray) -> dict[str, Any] | None:
     }
 
 
+def _log_history(payload: dict[str, Any], mode: str) -> None:
+    if supabase_client is None:
+        return
+
+    soc = payload.get("soc") or {}
+    record = {
+        "mode": mode,
+        "predicted_class": payload.get("predicted_class"),
+        "confidence": payload.get("confidence"),
+        "margin": payload.get("margin"),
+        "is_soil": payload.get("is_soil"),
+        "soc_value": soc.get("value"),
+        "soc_percent": soc.get("percent"),
+        "soc_g_per_kg": soc.get("g_per_kg"),
+        "soc_category": soc.get("category"),
+        "soc_note": soc.get("note"),
+    }
+
+    try:
+        supabase_client.table(SUPABASE_TABLE).insert(record).execute()
+    except Exception:
+        pass
+
+
 def _classify(img: np.ndarray) -> dict[str, Any]:
     if soil_classes is None:
         raise HTTPException(status_code=503, detail="Soil model not loaded.")
@@ -134,6 +172,7 @@ def _classify(img: np.ndarray) -> dict[str, Any]:
 def startup() -> None:
     _load_soil_models()
     _load_soc_model()
+    _init_supabase()
 
 
 @app.get("/health")
@@ -152,6 +191,7 @@ async def analyze(file: UploadFile = File(...)) -> dict[str, Any]:
     img = _decode_image(data)
     payload = _classify(img)
     payload["soc"] = _soc_payload(img) if payload["is_soil"] else None
+    _log_history(payload, "combined")
     return payload
 
 
@@ -159,7 +199,9 @@ async def analyze(file: UploadFile = File(...)) -> dict[str, Any]:
 async def classify(file: UploadFile = File(...)) -> dict[str, Any]:
     data = await file.read()
     img = _decode_image(data)
-    return _classify(img)
+    payload = _classify(img)
+    _log_history(payload, "classification")
+    return payload
 
 
 @app.post("/soc")
@@ -168,4 +210,5 @@ async def soc(file: UploadFile = File(...)) -> dict[str, Any]:
     img = _decode_image(data)
     payload = _classify(img)
     payload["soc"] = _soc_payload(img) if payload["is_soil"] else None
+    _log_history(payload, "soc")
     return payload

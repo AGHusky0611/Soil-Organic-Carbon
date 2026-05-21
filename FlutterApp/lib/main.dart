@@ -6,12 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 enum AnalyzeMode { combined, classification, soc }
 
-const _defaultApiBaseUrl = 'http://10.0.2.2:8000';
-const _prefsKeyApiBaseUrl = 'api_base_url';
+const _defaultApiBaseUrl = 'https://agrisync-gmxy.onrender.com';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -54,7 +52,6 @@ class SoilHomePage extends StatefulWidget {
 
 class _SoilHomePageState extends State<SoilHomePage> {
   final _picker = ImagePicker();
-  final _apiController = TextEditingController(text: _defaultApiBaseUrl);
 
   AnalyzeMode _mode = AnalyzeMode.combined;
   File? _imageFile;
@@ -63,72 +60,8 @@ class _SoilHomePageState extends State<SoilHomePage> {
   String? _error;
 
   @override
-  void initState() {
-    super.initState();
-    _loadApiBaseUrl();
-  }
-
-  @override
   void dispose() {
-    _apiController.dispose();
     super.dispose();
-  }
-
-  Future<void> _loadApiBaseUrl() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString(_prefsKeyApiBaseUrl);
-    if (saved != null && saved.trim().isNotEmpty) {
-      _apiController.text = saved.trim();
-    } else {
-      _apiController.text = _defaultApiBaseUrl;
-    }
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
-  Future<void> _saveApiBaseUrl(String value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefsKeyApiBaseUrl, value);
-  }
-
-  Future<void> _showApiSettingsDialog() async {
-    final controller = TextEditingController(text: _apiController.text);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('API Endpoint'),
-          content: TextField(
-            controller: controller,
-            keyboardType: TextInputType.url,
-            decoration: const InputDecoration(
-              labelText: 'Base URL',
-              helperText: 'Example: http://192.168.1.50:8000',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (result == null || result.isEmpty) {
-      return;
-    }
-
-    setState(() {
-      _apiController.text = result;
-    });
-    await _saveApiBaseUrl(result);
   }
 
   Future<void> _pickImage() async {
@@ -178,15 +111,13 @@ class _SoilHomePageState extends State<SoilHomePage> {
       return;
     }
 
-    final baseUrl = _apiController.text.trim();
+    final baseUrl = _defaultApiBaseUrl;
     if (baseUrl.isEmpty) {
       setState(() {
         _error = 'Enter the API base URL.';
       });
       return;
     }
-
-    await _saveApiBaseUrl(baseUrl);
 
     setState(() {
       _isLoading = true;
@@ -227,98 +158,165 @@ class _SoilHomePageState extends State<SoilHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Soil Organic Carbon')),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextField(
-                controller: _apiController,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  labelText: 'API Base URL',
-                  helperText: 'Android emulator uses http://10.0.2.2:8000',
-                  border: OutlineInputBorder(),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [colors.surface, const Color(0xFFF2F7F4)],
                 ),
               ),
-              const SizedBox(height: 16),
-              SegmentedButton<AnalyzeMode>(
-                segments: const [
-                  ButtonSegment(
-                    value: AnalyzeMode.combined,
-                    label: Text('Combined'),
-                  ),
-                  ButtonSegment(
-                    value: AnalyzeMode.classification,
-                    label: Text('Classification'),
-                  ),
-                  ButtonSegment(
-                    value: AnalyzeMode.soc,
-                    label: Text('SOC Only'),
-                  ),
-                ],
-                selected: {_mode},
-                onSelectionChanged: (selection) {
-                  setState(() {
-                    _mode = selection.first;
-                    _result = null;
-                    _error = null;
-                  });
-                },
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _pickImage,
-                      icon: const Icon(Icons.photo_library_outlined),
-                      label: const Text('Gallery'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _openCamera,
-                      icon: const Icon(Icons.camera_alt_outlined),
-                      label: const Text('Camera'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (_imageFile != null)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.file(
-                    _imageFile!,
-                    height: 240,
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _isLoading ? null : _analyze,
-                icon: const Icon(Icons.analytics_outlined),
-                label: Text(_isLoading ? 'Analyzing...' : 'Analyze'),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ],
-              if (_result != null) ...[
-                const SizedBox(height: 20),
-                _ResultCard(result: _result!, mode: _mode),
-              ],
-            ],
+            ),
           ),
-        ),
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Soil Organic Carbon',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Analyze soil images with classification and SOC insight.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 16),
+                  _SectionCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Mode',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 12),
+                        SegmentedButton<AnalyzeMode>(
+                          segments: const [
+                            ButtonSegment(
+                              value: AnalyzeMode.combined,
+                              label: Text('Combined'),
+                            ),
+                            ButtonSegment(
+                              value: AnalyzeMode.classification,
+                              label: Text('Classification'),
+                            ),
+                            ButtonSegment(
+                              value: AnalyzeMode.soc,
+                              label: Text('SOC Only'),
+                            ),
+                          ],
+                          selected: {_mode},
+                          onSelectionChanged: (selection) {
+                            setState(() {
+                              _mode = selection.first;
+                              _result = null;
+                              _error = null;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _SectionCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Soil image',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 12),
+                        if (_imageFile != null)
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: Image.file(
+                              _imageFile!,
+                              height: 220,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        else
+                          Container(
+                            height: 180,
+                            decoration: BoxDecoration(
+                              color: colors.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.image_outlined,
+                                  size: 36,
+                                  color: colors.onSurfaceVariant,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'No image selected',
+                                  style: Theme.of(context).textTheme.bodyMedium
+                                      ?.copyWith(
+                                        color: colors.onSurfaceVariant,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.tonalIcon(
+                                onPressed: _pickImage,
+                                icon: const Icon(Icons.photo_library_outlined),
+                                label: const Text('Gallery'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: FilledButton.tonalIcon(
+                                onPressed: _openCamera,
+                                icon: const Icon(Icons.camera_alt_outlined),
+                                label: const Text('Camera'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: _isLoading ? null : _analyze,
+                    icon: const Icon(Icons.analytics_outlined),
+                    label: Text(_isLoading ? 'Analyzing...' : 'Analyze'),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 16),
+                    Text(_error!, style: TextStyle(color: colors.error)),
+                  ],
+                  if (_result != null) ...[
+                    const SizedBox(height: 20),
+                    _ResultCard(result: _result!, mode: _mode),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -336,44 +334,113 @@ class _ResultCard extends StatelessWidget {
     final isSoil = result['is_soil'] == true;
     final showSoc = mode != AnalyzeMode.classification;
 
-    return Card(
-      elevation: 1,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Class: ${result['predicted_class']}',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Confidence: ${(result['confidence'] as num).toStringAsFixed(3)}',
-            ),
-            Text('Margin: ${(result['margin'] as num).toStringAsFixed(3)}'),
-            Text('Is Soil: $isSoil'),
-            if (showSoc) ...[
-              const SizedBox(height: 12),
-              if (soc != null) ...[
-                Text(
-                  'SOC: ${(soc['percent'] as num).toStringAsFixed(2)}%',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                Text('g/kg: ${(soc['g_per_kg'] as num).toStringAsFixed(2)}'),
-                Text('Category: ${soc['category']}'),
-                const SizedBox(height: 8),
-                Text('${soc['note']}'),
-              ] else
-                Text(
-                  isSoil
-                      ? 'SOC: model not available'
-                      : 'SOC blocked: image not classified as soil',
-                ),
+    return _SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Results', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 12),
+          Text(
+            result['predicted_class'].toString(),
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _MetricChip(
+                label: 'Confidence',
+                value: (result['confidence'] as num).toStringAsFixed(3),
+              ),
+              _MetricChip(
+                label: 'Margin',
+                value: (result['margin'] as num).toStringAsFixed(3),
+              ),
+              _MetricChip(label: 'Soil', value: isSoil ? 'Yes' : 'No'),
             ],
+          ),
+          if (showSoc) ...[
+            const SizedBox(height: 16),
+            if (soc != null) ...[
+              Text(
+                'SOC ${(soc['percent'] as num).toStringAsFixed(2)}%',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 6),
+              Text('g/kg ${(soc['g_per_kg'] as num).toStringAsFixed(2)}'),
+              Text('Category: ${soc['category']}'),
+              const SizedBox(height: 8),
+              Text('${soc['note']}'),
+            ] else
+              Text(
+                isSoil
+                    ? 'SOC: model not available'
+                    : 'SOC blocked: image not classified as soil',
+              ),
           ],
-        ),
+        ],
       ),
+    );
+  }
+}
+
+class _MetricChip extends StatelessWidget {
+  const _MetricChip({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: colors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 2),
+          Text(value, style: Theme.of(context).textTheme.titleSmall),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionCard extends StatelessWidget {
+  const _SectionCard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+        border: Border.all(color: colors.surfaceContainerHighest),
+      ),
+      child: child,
     );
   }
 }
