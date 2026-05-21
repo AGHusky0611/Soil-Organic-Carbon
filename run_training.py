@@ -1,4 +1,5 @@
 import os
+import argparse
 import cv2
 import shutil
 import numpy as np
@@ -6,7 +7,7 @@ import pandas as pd
 from datetime import datetime
 from ClassificationModels.SVM_Calibrator import SoilCalibratorSVM, SoilClassifierSVM
 from ClassificationModels.CLS_extraction import LabColorExtractor
-from ClassificationModels.XGB_Classification import SoilClassifierXGB
+from ClassificationModels.XGB_Classification import SoilClassifierXGB, tune_xgb_classification
 
 class TrainingManager:
     def __init__(self, data_dir="ResearchData", log_file="training_history.xlsx"):
@@ -63,13 +64,23 @@ class TrainingManager:
             df = pd.concat([pd.read_excel(self.log_file), df], ignore_index=True)
         df.to_excel(self.log_file, index=False)
 
-    def execute(self):
+    def execute(self, tune_xgb=False):
         start = datetime.now()
         self.reset_artifacts()
         X, y = self.process_balanced_dataset()
         
         if len(X) == 0: return
-        results = self.classifier.train(X, y)
+        if tune_xgb:
+            tuning = tune_xgb_classification(X, y)
+            if tuning is None:
+                return
+            results = {
+                "accuracy": 0.0,
+                "macro_f1": tuning["best_macro_f1"],
+                "weighted_f1": 0.0,
+            }
+        else:
+            results = self.classifier.train(X, y)
         
         end = datetime.now()
         log = {
@@ -107,8 +118,17 @@ class TrainingManager:
             df_cm = pd.DataFrame(conf_mat, index=class_names, columns=class_names)
             df_cm.to_excel("confusion_matrix.xlsx", index=True)
 
-        self.svm_classifier.train(X, y)
-        print("SVM model trained and saved to soil_svm.pkl")
+        if not tune_xgb:
+            self.svm_classifier.train(X, y)
+            print("SVM model trained and saved to soil_svm.pkl")
 
 if __name__ == "__main__":
-    TrainingManager().execute()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--tune-xgb",
+        action="store_true",
+        help="Run XGBoost classification parameter tuning",
+    )
+    args = parser.parse_args()
+
+    TrainingManager().execute(tune_xgb=args.tune_xgb)
