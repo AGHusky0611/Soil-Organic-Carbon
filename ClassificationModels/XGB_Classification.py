@@ -67,9 +67,8 @@ class SoilClassifierXGB:
         
         self.clf.save_model(self.model_path)
         np.save("soil_classes.npy", self.encoder.classes_)
-        
-        
-    pd.DataFrame([{
+
+        pd.DataFrame([{
             "accuracy": results["accuracy"],
             "macro_f1": results["macro_f1"],
             "weighted_f1": results["weighted_f1"],
