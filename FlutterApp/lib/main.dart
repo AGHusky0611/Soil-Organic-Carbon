@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
 enum AnalyzeMode { combined, classification, soc }
 
@@ -322,14 +323,69 @@ class _SoilHomePageState extends State<SoilHomePage> {
   }
 }
 
-class _ResultCard extends StatelessWidget {
+class _ResultCard extends StatefulWidget {
   const _ResultCard({required this.result, required this.mode});
 
   final Map<String, dynamic> result;
   final AnalyzeMode mode;
 
   @override
+  State<_ResultCard> createState() => _ResultCardState();
+}
+
+class _ResultCardState extends State<_ResultCard> {
+  bool _isSaving = false;
+  String? _saveMessage;
+
+  Future<void> _saveResults() async {
+    setState(() {
+      _isSaving = true;
+      _saveMessage = null;
+    });
+
+    try {
+      // Get the documents directory
+      final directory = await getApplicationDocumentsDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = 'soil_analysis_$timestamp.json';
+      final file = File('${directory.path}/$fileName');
+
+      // Prepare the data to save
+      final data = {
+        'timestamp': DateTime.now().toIso8601String(),
+        'mode': widget.mode.toString(),
+        'result': widget.result,
+      };
+
+      // Write the file
+      await file.writeAsString(jsonEncode(data));
+
+      setState(() {
+        _saveMessage = 'Results saved: $fileName';
+      });
+
+      // Clear message after 3 seconds
+      await Future.delayed(const Duration(seconds: 3));
+      if (mounted) {
+        setState(() {
+          _saveMessage = null;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _saveMessage = 'Error saving: $e';
+      });
+    } finally {
+      setState(() {
+        _isSaving = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final result = widget.result;
+    final mode = widget.mode;
     final soc = result['soc'] as Map<String, dynamic>?;
     final isSoil = result['is_soil'] == true;
     final showSoc = mode != AnalyzeMode.classification;
@@ -338,7 +394,38 @@ class _ResultCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Results', style: Theme.of(context).textTheme.titleSmall),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Results', style: Theme.of(context).textTheme.titleSmall),
+              FilledButton.tonalIcon(
+                onPressed: _isSaving ? null : _saveResults,
+                icon: const Icon(Icons.save_outlined),
+                label: Text(_isSaving ? 'Saving...' : 'Save'),
+              ),
+            ],
+          ),
+          if (_saveMessage != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _saveMessage!.startsWith('Error')
+                    ? Colors.red.shade100
+                    : Colors.green.shade100,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                _saveMessage!,
+                style: TextStyle(
+                  color: _saveMessage!.startsWith('Error')
+                      ? Colors.red.shade700
+                      : Colors.green.shade700,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           Text(
             result['predicted_class'].toString(),
