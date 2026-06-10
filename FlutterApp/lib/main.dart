@@ -9,8 +9,6 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
-enum AnalyzeMode { combined, classification, soc }
-
 const _defaultApiBaseUrl = 'https://agrisync-gmxy.onrender.com';
 
 void main() {
@@ -55,11 +53,10 @@ class SoilHomePage extends StatefulWidget {
 class _SoilHomePageState extends State<SoilHomePage> {
   final _picker = ImagePicker();
 
-  AnalyzeMode _mode = AnalyzeMode.combined;
   File? _imageFile;
-  Map<String, dynamic>? _result;
-  bool _isLoading = false;
+  bool _isProcessing = false;
   String? _error;
+  String? _successMessage;
 
   @override
   void dispose() {
@@ -74,8 +71,8 @@ class _SoilHomePageState extends State<SoilHomePage> {
 
     setState(() {
       _imageFile = File(image.path);
-      _result = null;
       _error = null;
+      _successMessage = null;
     });
   }
 
@@ -89,23 +86,12 @@ class _SoilHomePageState extends State<SoilHomePage> {
 
     setState(() {
       _imageFile = captured;
-      _result = null;
       _error = null;
+      _successMessage = null;
     });
   }
 
-  String _endpointForMode(AnalyzeMode mode) {
-    switch (mode) {
-      case AnalyzeMode.classification:
-        return '/classify';
-      case AnalyzeMode.soc:
-        return '/soc';
-      case AnalyzeMode.combined:
-        return '/analyze';
-    }
-  }
-
-  Future<void> _analyze() async {
+  Future<void> _preprocess() async {
     if (_imageFile == null) {
       setState(() {
         _error = 'Pick an image first.';
@@ -113,22 +99,22 @@ class _SoilHomePageState extends State<SoilHomePage> {
       return;
     }
 
-    final baseUrl = _defaultApiBaseUrl;
-    if (baseUrl.isEmpty) {
-      setState(() {
-        _error = 'Enter the API base URL.';
-      });
-      return;
-    }
-
     setState(() {
-      _isLoading = true;
+      _isProcessing = true;
       _error = null;
-      _result = null;
+      _successMessage = null;
     });
 
     try {
-      final uri = Uri.parse('$baseUrl${_endpointForMode(_mode)}');
+      final baseUrl = _defaultApiBaseUrl;
+      if (baseUrl.isEmpty) {
+        setState(() {
+          _error = 'Enter the API base URL.';
+        });
+        return;
+      }
+
+      final uri = Uri.parse('$baseUrl/preprocess');
       final request = http.MultipartRequest('POST', uri);
       request.files.add(
         await http.MultipartFile.fromPath('file', _imageFile!.path),
@@ -138,13 +124,21 @@ class _SoilHomePageState extends State<SoilHomePage> {
       final response = await http.Response.fromStream(streamed);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
         setState(() {
-          _result = data;
+          _successMessage = 'Image preprocessed and saved successfully!';
+          _imageFile = null;
         });
+
+        // Clear success message after 3 seconds
+        await Future.delayed(const Duration(seconds: 3));
+        if (mounted) {
+          setState(() {
+            _successMessage = null;
+          });
+        }
       } else {
         setState(() {
-          _error = 'Server error: ${response.statusCode} ${response.body}';
+          _error = 'Error: ${response.statusCode} ${response.body}';
         });
       }
     } catch (exc) {
@@ -153,7 +147,7 @@ class _SoilHomePageState extends State<SoilHomePage> {
       });
     } finally {
       setState(() {
-        _isLoading = false;
+        _isProcessing = false;
       });
     }
   }
@@ -187,42 +181,29 @@ class _SoilHomePageState extends State<SoilHomePage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Analyze soil images with classification and SOC insight.',
+                    'Capture and preprocess soil images.',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 16),
-                  _SectionCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.amber.shade200),
+                    ),
+                    child: Row(
                       children: [
-                        Text(
-                          'Mode',
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 12),
-                        SegmentedButton<AnalyzeMode>(
-                          segments: const [
-                            ButtonSegment(
-                              value: AnalyzeMode.combined,
-                              label: Text('Combined'),
+                        Icon(Icons.info_outline, color: Colors.amber.shade700),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'XGBoost Disabled',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Colors.amber.shade700,
+                              fontWeight: FontWeight.w600,
                             ),
-                            ButtonSegment(
-                              value: AnalyzeMode.classification,
-                              label: Text('Classification'),
-                            ),
-                            ButtonSegment(
-                              value: AnalyzeMode.soc,
-                              label: Text('SOC Only'),
-                            ),
-                          ],
-                          selected: {_mode},
-                          onSelectionChanged: (selection) {
-                            setState(() {
-                              _mode = selection.first;
-                              _result = null;
-                              _error = null;
-                            });
-                          },
+                          ),
                         ),
                       ],
                     ),
@@ -298,9 +279,9 @@ class _SoilHomePageState extends State<SoilHomePage> {
                   ),
                   const SizedBox(height: 16),
                   FilledButton.icon(
-                    onPressed: _isLoading ? null : _analyze,
-                    icon: const Icon(Icons.analytics_outlined),
-                    label: Text(_isLoading ? 'Analyzing...' : 'Analyze'),
+                    onPressed: _isProcessing ? null : _preprocess,
+                    icon: const Icon(Icons.save_outlined),
+                    label: Text(_isProcessing ? 'Processing...' : 'Save'),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       textStyle: const TextStyle(fontWeight: FontWeight.w600),
@@ -308,233 +289,36 @@ class _SoilHomePageState extends State<SoilHomePage> {
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 16),
-                    Text(_error!, style: TextStyle(color: colors.error)),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: colors.error.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        _error!,
+                        style: TextStyle(color: colors.error),
+                      ),
+                    ),
                   ],
-                  if (_result != null) ...[
-                    const SizedBox(height: 20),
-                    _ResultCard(
-                      result: _result!,
-                      mode: _mode,
-                      originalImageFile: _imageFile,
+                  if (_successMessage != null) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        _successMessage!,
+                        style: TextStyle(color: Colors.green.shade700),
+                      ),
                     ),
                   ],
                 ],
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ResultCard extends StatefulWidget {
-  const _ResultCard({
-    required this.result,
-    required this.mode,
-    required this.originalImageFile,
-  });
-
-  final Map<String, dynamic> result;
-  final AnalyzeMode mode;
-  final File? originalImageFile;
-
-  @override
-  State<_ResultCard> createState() => _ResultCardState();
-}
-
-class _ResultCardState extends State<_ResultCard> {
-  bool _isSaving = false;
-  String? _saveMessage;
-
-  Future<void> _saveResults() async {
-    setState(() {
-      _isSaving = true;
-      _saveMessage = null;
-    });
-
-    try {
-      int savedCount = 0;
-
-      // Save original image to gallery
-      if (widget.originalImageFile != null) {
-        try {
-          await Gal.putImage(widget.originalImageFile!.path);
-          savedCount++;
-        } catch (e) {
-          // Continue even if original image fails
-        }
-      }
-
-      // Fetch and save augmented (CLS processed) image from backend
-      final imageId = widget.result['image_id'] as String?;
-      if (imageId != null && imageId.isNotEmpty) {
-        try {
-          final baseUrl = 'https://agrisync-gmxy.onrender.com';
-          final uri = Uri.parse('$baseUrl/image/$imageId/augmented');
-
-          final response = await http.get(uri);
-          if (response.statusCode == 200) {
-            final augmentedData = jsonDecode(response.body);
-            if (augmentedData['found'] == true) {
-              final imageBytes = base64Decode(augmentedData['image'] as String);
-
-              try {
-                final tempDir = await getTemporaryDirectory();
-                final tempFile = File('${tempDir.path}/augmented_$imageId.jpg');
-                await tempFile.writeAsBytes(imageBytes);
-                await Gal.putImage(tempFile.path);
-                savedCount++;
-              } catch (e) {
-                // Continue even if augmented image fails
-              }
-            }
-          }
-        } catch (e) {
-          // Continue even if augmented image fails
-        }
-      }
-
-      setState(() {
-        _saveMessage = savedCount > 0
-            ? 'Saved $savedCount image(s) to gallery!'
-            : 'Error: Could not save images';
-      });
-
-      await Future.delayed(const Duration(seconds: 3));
-      if (mounted) {
-        setState(() {
-          _saveMessage = null;
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _saveMessage = 'Error saving: $e';
-      });
-    } finally {
-      setState(() {
-        _isSaving = false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final result = widget.result;
-    final mode = widget.mode;
-    final soc = result['soc'] as Map<String, dynamic>?;
-    final isSoil = result['is_soil'] == true;
-    final showSoc = mode != AnalyzeMode.classification;
-
-    return _SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Results', style: Theme.of(context).textTheme.titleSmall),
-              FilledButton.tonalIcon(
-                onPressed: _isSaving ? null : _saveResults,
-                icon: const Icon(Icons.save_outlined),
-                label: Text(_isSaving ? 'Saving...' : 'Save'),
-              ),
-            ],
-          ),
-          if (_saveMessage != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: _saveMessage!.startsWith('Error')
-                    ? Colors.red.shade100
-                    : Colors.green.shade100,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                _saveMessage!,
-                style: TextStyle(
-                  color: _saveMessage!.startsWith('Error')
-                      ? Colors.red.shade700
-                      : Colors.green.shade700,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
-          Text(
-            result['predicted_class'].toString(),
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _MetricChip(
-                label: 'Confidence',
-                value: (result['confidence'] as num).toStringAsFixed(3),
-              ),
-              _MetricChip(
-                label: 'Margin',
-                value: (result['margin'] as num).toStringAsFixed(3),
-              ),
-              _MetricChip(label: 'Soil', value: isSoil ? 'Yes' : 'No'),
-            ],
-          ),
-          if (showSoc) ...[
-            const SizedBox(height: 16),
-            if (soc != null) ...[
-              Text(
-                'SOC ${(soc['percent'] as num).toStringAsFixed(2)}%',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 6),
-              Text('g/kg ${(soc['g_per_kg'] as num).toStringAsFixed(2)}'),
-              Text('Category: ${soc['category']}'),
-              const SizedBox(height: 8),
-              Text('${soc['note']}'),
-            ] else
-              Text(
-                isSoil
-                    ? 'SOC: model not available'
-                    : 'SOC blocked: image not classified as soil',
-              ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricChip extends StatelessWidget {
-  const _MetricChip({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(color: colors.onSurfaceVariant),
-          ),
-          const SizedBox(height: 2),
-          Text(value, style: Theme.of(context).textTheme.titleSmall),
         ],
       ),
     );

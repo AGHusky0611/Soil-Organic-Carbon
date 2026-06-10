@@ -183,6 +183,25 @@ def _classify(img: np.ndarray) -> dict[str, Any]:
     }
 
 
+@app.post("/preprocess")
+async def preprocess(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Preprocess image with white balance, denoising, and standardization"""
+    data = await file.read()
+    img = _decode_image(data)
+    
+    # Apply preprocessing
+    preprocessed = extractor.preprocess_image(img)
+    
+    # Save and return
+    image_paths = _save_image_pair(img, preprocessed)
+    
+    return {
+        "status": "success",
+        "image_id": image_paths.get("image_id", ""),
+        "original_path": image_paths.get("original_path", ""),
+        "augmented_path": image_paths.get("augmented_path", ""),
+    }
+
 @app.on_event("startup")
 def startup() -> None:
     _load_soil_models()
