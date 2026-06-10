@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:image_gallery_saver/image_gallery_saver.dart';
 
 enum AnalyzeMode { combined, classification, soc }
 
@@ -311,7 +312,11 @@ class _SoilHomePageState extends State<SoilHomePage> {
                   ],
                   if (_result != null) ...[
                     const SizedBox(height: 20),
-                    _ResultCard(result: _result!, mode: _mode),
+                    _ResultCard(
+                      result: _result!,
+                      mode: _mode,
+                      originalImageFile: _imageFile,
+                    ),
                   ],
                 ],
               ),
@@ -324,10 +329,15 @@ class _SoilHomePageState extends State<SoilHomePage> {
 }
 
 class _ResultCard extends StatefulWidget {
-  const _ResultCard({required this.result, required this.mode});
+  const _ResultCard({
+    required this.result,
+    required this.mode,
+    required this.originalImageFile,
+  });
 
   final Map<String, dynamic> result;
   final AnalyzeMode mode;
+  final File? originalImageFile;
 
   @override
   State<_ResultCard> createState() => _ResultCardState();
@@ -344,27 +354,57 @@ class _ResultCardState extends State<_ResultCard> {
     });
 
     try {
-      // Get the documents directory
-      final directory = await getApplicationDocumentsDirectory();
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final fileName = 'soil_analysis_$timestamp.json';
-      final file = File('${directory.path}/$fileName');
+      int savedCount = 0;
 
-      // Prepare the data to save
-      final data = {
-        'timestamp': DateTime.now().toIso8601String(),
-        'mode': widget.mode.toString(),
-        'result': widget.result,
-      };
+      // Save original image to gallery
+      if (widget.originalImageFile != null) {
+        final result = await ImageGallerySaver.saveImage(
+          widget.originalImageFile!.path,
+          quality: 100,
+          name: 'soil_analysis_${DateTime.now().millisecondsSinceEpoch}',
+        );
+        if (result == true) {
+          savedCount++;
+        }
+      }
 
-      // Write the file
-      await file.writeAsString(jsonEncode(data));
+      // Fetch and save augmented (CLS processed) image from backend
+      final imageId = widget.result['image_id'] as String?;
+      if (imageId != null && imageId.isNotEmpty) {
+        try {
+          final baseUrl = 'https://agrisync-gmxy.onrender.com';
+          final uri = Uri.parse('$baseUrl/image/$imageId/augmented');
+
+          final response = await http.get(uri);
+          if (response.statusCode == 200) {
+            final augmentedData = jsonDecode(response.body);
+            if (augmentedData['found'] == true) {
+              final imageBytes = base64Decode(augmentedData['image'] as String);
+              final tempDir = await getApplicationTemporaryDirectory();
+              final tempFile = File('${tempDir.path}/augmented_$imageId.jpg');
+              await tempFile.writeAsBytes(imageBytes);
+
+              final result = await ImageGallerySaver.saveImage(
+                tempFile.path,
+                quality: 100,
+                name: 'augmented_${DateTime.now().millisecondsSinceEpoch}',
+              );
+              if (result == true) {
+                savedCount++;
+              }
+            }
+          }
+        } catch (e) {
+          // Continue even if augmented image fails
+        }
+      }
 
       setState(() {
-        _saveMessage = 'Results saved: $fileName';
+        _saveMessage = savedCount > 0
+            ? 'Saved $savedCount image(s) to gallery!'
+            : 'Error: Could not save images';
       });
 
-      // Clear message after 3 seconds
       await Future.delayed(const Duration(seconds: 3));
       if (mounted) {
         setState(() {

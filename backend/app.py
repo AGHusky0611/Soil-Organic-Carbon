@@ -10,6 +10,7 @@ import xgboost as xgb
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
+import base64
 
 from ClassificationModels.CLS_extraction import LabColorExtractor
 from ClassificationModels.SVM_Calibrator import SoilCalibratorSVM
@@ -238,7 +239,9 @@ async def get_image(image_id: str, image_type: str = "original") -> dict[str, An
                 image_file = dir_path / f"{image_type}.jpg"
                 if image_file.exists():
                     with open(image_file, "rb") as f:
-                        return {"image": f.read(), "found": True}
+                        image_data = f.read()
+                        encoded = base64.b64encode(image_data).decode('utf-8')
+                        return {"image": encoded, "found": True}
         
         raise HTTPException(status_code=404, detail="Image not found.")
     except Exception as e:
