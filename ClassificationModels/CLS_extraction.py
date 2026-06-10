@@ -43,7 +43,7 @@ class LabColorExtractor:
         
         for distance in distances:
             for angle in angles:
-                glcm = graycomatrix(
+                raycomatrix(
                     gray_reduced, 
                     distances=[distance], 
                     angles=[angle], 
@@ -108,3 +108,20 @@ class LabColorExtractor:
         lab_features = np.array([mean_l, mean_a, mean_b, std_l, std_a, std_b, laplacian_var])
         
         return np.hstack([glcm_features, lab_features])
+
+    def preprocess_image(self, img):
+        """
+        Preprocess image for better visual quality
+        
+        Steps:
+        1. White balance correction
+        2. Light denoising (Gaussian blur)
+        3. Dimensional standardization
+        """
+        if img is None:
+            return None
+        
+        wb_img = self._white_balance(img)
+        denoised = self._denoise(wb_img)
+        standardized = self._dimensional_standardization(denoised)
+        return standardized
