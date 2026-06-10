@@ -1,5 +1,5 @@
 import os
-cd import uuid
+import uuid
 from datetime import datetime
 from typing import Any
 from pathlib import Path
