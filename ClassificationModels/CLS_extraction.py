@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from skimage.feature import greycomatrix, greycoprops
+from skimage.feature import graycomatrix, graycoprops
 from scipy import ndimage
 
 class LabColorExtractor:
@@ -43,7 +43,7 @@ class LabColorExtractor:
         
         for distance in distances:
             for angle in angles:
-                glcm = greycomatrix(
+                glcm = graycomatrix(
                     gray_reduced, 
                     distances=[distance], 
                     angles=[angle], 
@@ -54,12 +54,12 @@ class LabColorExtractor:
                 glcm = glcm[:, :, 0, 0]
                 
                 # Extract GLCM properties
-                contrast = greycoprops(glcm, 'contrast')[0, 0]
-                dissimilarity = greycoprops(glcm, 'dissimilarity')[0, 0]
-                homogeneity = greycoprops(glcm, 'homogeneity')[0, 0]
-                energy = greycoprops(glcm, 'energy')[0, 0]
-                correlation = greycoprops(glcm, 'correlation')[0, 0]
-                asm = greycoprops(glcm, 'asm')[0, 0]
+                contrast = graycoprops(glcm, 'contrast')[0, 0]
+                dissimilarity = graycoprops(glcm, 'dissimilarity')[0, 0]
+                homogeneity = graycoprops(glcm, 'homogeneity')[0, 0]
+                energy = graycoprops(glcm, 'energy')[0, 0]
+                correlation = graycoprops(glcm, 'correlation')[0, 0]
+                asm = graycoprops(glcm, 'asm')[0, 0]
                 
                 glcm_features.extend([
                     contrast, dissimilarity, homogeneity, 
