@@ -3,11 +3,11 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:gal/gal.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:image_gallery_saver/image_gallery_saver.dart';
 
 enum AnalyzeMode { combined, classification, soc }
 
@@ -358,13 +358,11 @@ class _ResultCardState extends State<_ResultCard> {
 
       // Save original image to gallery
       if (widget.originalImageFile != null) {
-        final result = await ImageGallerySaver.saveImage(
-          widget.originalImageFile!.path,
-          quality: 100,
-          name: 'soil_analysis_${DateTime.now().millisecondsSinceEpoch}',
-        );
-        if (result == true) {
+        try {
+          await Gal.putImage(widget.originalImageFile!.path);
           savedCount++;
+        } catch (e) {
+          // Continue even if original image fails
         }
       }
 
@@ -380,17 +378,15 @@ class _ResultCardState extends State<_ResultCard> {
             final augmentedData = jsonDecode(response.body);
             if (augmentedData['found'] == true) {
               final imageBytes = base64Decode(augmentedData['image'] as String);
-              final tempDir = await getApplicationTemporaryDirectory();
-              final tempFile = File('${tempDir.path}/augmented_$imageId.jpg');
-              await tempFile.writeAsBytes(imageBytes);
 
-              final result = await ImageGallerySaver.saveImage(
-                tempFile.path,
-                quality: 100,
-                name: 'augmented_${DateTime.now().millisecondsSinceEpoch}',
-              );
-              if (result == true) {
+              try {
+                final tempDir = await getTemporaryDirectory();
+                final tempFile = File('${tempDir.path}/augmented_$imageId.jpg');
+                await tempFile.writeAsBytes(imageBytes);
+                await Gal.putImage(tempFile.path);
                 savedCount++;
+              } catch (e) {
+                // Continue even if augmented image fails
               }
             }
           }
