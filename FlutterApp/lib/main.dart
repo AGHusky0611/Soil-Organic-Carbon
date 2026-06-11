@@ -124,8 +124,44 @@ class _SoilHomePageState extends State<SoilHomePage> {
       final response = await http.Response.fromStream(streamed);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
+        int savedCount = 0;
+
+        // Save original image to gallery
+        try {
+          await Gal.putImage(_imageFile!.path);
+          savedCount++;
+        } catch (e) {
+          // Continue even if original fails
+        }
+
+        // Fetch and save processed image from backend
+        try {
+          final responseData = jsonDecode(response.body);
+          final imageId = responseData['image_id'] as String?;
+
+          if (imageId != null && imageId.isNotEmpty) {
+            final imageUri = Uri.parse('$baseUrl/image/$imageId/augmented');
+            final imageResponse = await http.get(imageUri);
+
+            if (imageResponse.statusCode == 200) {
+              final imageData = jsonDecode(imageResponse.body);
+              if (imageData['found'] == true) {
+                final imageBytes = base64Decode(imageData['image'] as String);
+
+                final tempDir = await getTemporaryDirectory();
+                final tempFile = File('${tempDir.path}/processed_$imageId.jpg');
+                await tempFile.writeAsBytes(imageBytes);
+                await Gal.putImage(tempFile.path);
+                savedCount++;
+              }
+            }
+          }
+        } catch (e) {
+          // Continue even if processed image fails
+        }
+
         setState(() {
-          _successMessage = 'Image preprocessed and saved successfully!';
+          _successMessage = 'Saved $savedCount image(s) to gallery!';
           _imageFile = null;
         });
 
