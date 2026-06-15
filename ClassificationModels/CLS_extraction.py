@@ -53,7 +53,7 @@ class LabColorExtractor:
         gray_reduced = (gray / 32).astype(np.uint8)
         
         # Compute GLCM for multiple directions
-        distances = [1]
+        distances = [1, 2, 3]
         angles = [0, np.pi/4, np.pi/2, 3*np.pi/4]
         
         glcm_features = []
@@ -68,15 +68,16 @@ class LabColorExtractor:
                     symmetric=True, 
                     normed=True
                 )
-                glcm = glcm[:, :, 0, 0]
+                
+                # REVISION: Removed the 'glcm = glcm[:, :, 0, 0]' slice so it remains 4D
                 
                 # Extract GLCM properties
-                contrast = graycoprops(glcm, 'contrast')[0, 0]
-                dissimilarity = graycoprops(glcm, 'dissimilarity')[0, 0]
-                homogeneity = graycoprops(glcm, 'homogeneity')[0, 0]
-                energy = graycoprops(glcm, 'energy')[0, 0]
-                correlation = graycoprops(glcm, 'correlation')[0, 0]
-                asm = graycoprops(glcm, 'asm')[0, 0]
+                contrast = graycoprops(glcm, 'contrast')
+                dissimilarity = graycoprops(glcm, 'dissimilarity')
+                homogeneity = graycoprops(glcm, 'homogeneity')
+                energy = graycoprops(glcm, 'energy')
+                correlation = graycoprops(glcm, 'correlation')
+                asm = graycoprops(glcm, 'asm')
                 
                 glcm_features.extend([
                     contrast, dissimilarity, homogeneity, 
