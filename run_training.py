@@ -8,9 +8,10 @@ from datetime import datetime
 from ClassificationModels.SVM_Calibrator import SoilCalibratorSVM, SoilClassifierSVM
 from ClassificationModels.CLS_extraction import LabColorExtractor
 from ClassificationModels.XGB_Classification import SoilClassifierXGB, tune_xgb_classification
+from SOCModels.XGBoost_NPK import train_xgb_npk
 
 class TrainingManager:
-    def __init__(self, data_dir="ResearchData", log_file="training_history.xlsx"):
+    def __init__(self, data_dir="SoilScanDataset", log_file="training_history.xlsx"):
         self.data_dir = data_dir
         self.log_file = log_file
         self.img_size = (128, 128)
@@ -68,7 +69,24 @@ class TrainingManager:
             df = pd.concat([pd.read_excel(self.log_file), df], ignore_index=True)
         df.to_excel(self.log_file, index=False)
 
-    def execute(self, tune_xgb=False):
+    def train_npk_models(self):
+        """Train NPK models using the full pipeline: SVM → CLS → XGBoost NPK"""
+        print("\n" + "="*50)
+        print("STARTING NPK MODEL TRAINING")
+        print("="*50)
+        
+        csv_path = f"{self.data_dir}/micro-dataset.csv"
+        
+        # This calls XGBoost_NPK training which internally uses SVM + CLS
+        results = train_xgb_npk(
+            csv_path=csv_path,
+            image_base_dir=self.data_dir,
+            image_size=(128, 128)
+        )
+        
+        return results
+    
+    def execute(self, tune_xgb=False, train_npk=True):
         start = datetime.now()
         self.reset_artifacts()
         X, y = self.process_balanced_dataset()
@@ -84,7 +102,7 @@ class TrainingManager:
                 "weighted_f1": 0.0,
             }
         else:
-            results = self.classifier.train(X, y)
+            results = self.classifier.train(X, y)  # ← XGB_Classification is used
         
         end = datetime.now()
         log = {
@@ -126,18 +144,15 @@ class TrainingManager:
             self.svm_classifier.train(X, y)
             print("SVM model trained and saved to soil_svm.pkl")
 
+        if train_npk:
+            print("\n[PIPELINE] Training NPK models...")
+            self.train_npk_models()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--tune-xgb", action="store_true", help="Run XGB hyperparameter tuning")
+    parser.add_argument("--npk", action="store_true", default=True, help="Train NPK models")
     args = parser.parse_args()
-
-    if args.tune_xgb:
-        # You need to load or build X, y here, same as in training
-        tm = TrainingManager()
-        X, y = tm.process_balanced_dataset()
-        if len(X) == 0:
-            print("No data found.")
-        else:
-            tune_xgb_classification(X, y)
-    else:
-        TrainingManager().execute()
+    
+    tm = TrainingManager("SoilScanDataset")
+    tm.execute(tune_xgb=args.tune_xgb, train_npk=args.npk)
