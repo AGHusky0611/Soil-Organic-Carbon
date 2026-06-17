@@ -25,7 +25,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from SOCModels.XGBoost_NPK import train_xgb_npk
+from SOCModels.PRXGBoost_NPK import train_xgb_npk
 
 
 class TrainingManager:
