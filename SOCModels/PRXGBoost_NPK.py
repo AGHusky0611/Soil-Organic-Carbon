@@ -52,13 +52,15 @@ LABEL_MAP = {0: "Low", 1: "Medium", 2: "High"}
 # Parameter grid (mirrors SOC tuning style)
 # ---------------------------------------------------------------------------
 PARAM_GRID = {
-    "n_estimators":     [150, 250, 350],
-    "learning_rate":    [0.05, 0.1],
-    "max_depth":        [4, 6],
-    "rate_drop":        [0.1, 0.2],
+    "n_estimators":     [50, 100, 150],        # reduced — 350 trees on 51 samples memorises
+    "learning_rate":    [0.01, 0.05, 0.1],
+    "max_depth":        [2, 3, 4],             # shallower trees generalise better on small N
+    "rate_drop":        [0.1, 0.3],
     "skip_drop":        [0.5],
-    "subsample":        [0.7, 0.8, 0.9],
-    "colsample_bytree": [0.7, 0.8],
+    "subsample":        [0.6, 0.7, 0.8],
+    "colsample_bytree": [0.5, 0.6, 0.7],
+    "reg_alpha":        [0.1, 1.0],            # L1 regularisation — new
+    "reg_lambda":       [1.0, 5.0],            # L2 regularisation — new
 }
 
 XGB_FIXED = {
@@ -66,7 +68,7 @@ XGB_FIXED = {
     "objective":        "multi:softprob",
     "eval_metric":      "mlogloss",
     "random_state":     42,
-    "min_child_weight": 2,
+    "min_child_weight": 5,                     # raised from 2; prevents splits on tiny groups
 }
 
 
@@ -281,12 +283,15 @@ def train_xgb_npk(
         print(f"[TUNE] Total configs: {len(grid)}")
         print(f"{'='*55}")
 
-        all_results = []
-        best_acc    = -1
-        best_params = None
+        all_results   = []
+        best_acc      = -1
+        best_params   = None
+        total_configs = len(grid)
 
-        for params in grid:
-            print(f"[TUNE] Running params: {params}")
+        for cfg_idx, params in enumerate(grid, start=1):
+            pct = cfg_idx / total_configs * 100
+            print(f"\n{pct:5.1f}% [{cfg_idx}/{total_configs}] {nutrient} — "
+                  f"Running params: {params}")
             start_time = time.time()
 
             loo        = LeaveOneOut()
@@ -353,9 +358,13 @@ def train_xgb_npk(
         final_model.save_model(model_path)
         print(f"[NPK] Saved {nutrient} model -> {model_path}")
 
+        # Report on LOO predictions (honest generalisation estimate).
+        # NOTE: Do NOT report on full-training-set predictions here — a model
+        # retrained on 100% of its own data will always show perfect scores,
+        # which is misleading and not a measure of generalisation.
         class_names = [LABEL_MAP[c] for c in range(num_class)]
-        preds_full  = np.argmax(final_model.predict_proba(X), axis=1)
-        print(classification_report(y, preds_full,
+        print(f"[NPK] {nutrient} — LOO Cross-Validated Classification Report:")
+        print(classification_report(y, fold_preds,
                                     target_names=class_names,
                                     zero_division=0))
 
