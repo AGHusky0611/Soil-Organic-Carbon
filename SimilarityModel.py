@@ -5,26 +5,25 @@ Compares preprocessed soil images from two pipeline folders:
   - AgriCapture  : crop + center only
   - TerraScan    : BrightnessCalibrator → white balance → denoise → 256×256
 
-Usage
------
-    from pipeline_similarity import PipelineSimilarityAnalyzer
+Upgraded to measure Similarity, Image Quality, Feature Counts, and generate Visual Diffs.
 
-    analyzer = PipelineSimilarityAnalyzer(
-        agricapture_dir="path/to/AgriCap_outputs",
-        terrascan_dir="path/to/TerraScan_outputs",
-        output_csv="similarity_results.csv",   # optional, defaults to "similarity_results.csv"
-    )
-    analyzer.run()
-
-Image matching
---------------
-Files are matched by the UUID segment in the filename
-(the last 8-hex token before the extension, e.g. ec88f187).
-Unmatched files are reported and skipped.
 
 Dependencies
 ------------
-    pip install opencv-python scikit-image numpy scipy scikit-learn
+    pip install opencv-python scikit-image numpy scipy scikit-learn matplotlib
+
+
+README USAGE:
+Visualizer:
+python SimilarityModel.py SoilScanDataset ProcessedSoilScanDataset --output-csv results.csv --visualize
+
+CLI | CSV
+python SimilarityModel.py SoilScanDataset ProcessedSoilScanDataset --output-csv results.csv
+
+OUTPUT:
+./Visual_comparisons/  (if --visualize)
+./results.csv  (if --output-csv)
+
 """
 
 import os
@@ -38,10 +37,12 @@ import numpy as np
 from scipy.spatial.distance import cosine
 from skimage.metrics import structural_similarity as ssim
 from skimage.feature import graycomatrix, graycoprops
+from skimage.measure import shannon_entropy
+import matplotlib.pyplot as plt
 
 
 # ── UUID extractor ─────────────────────────────────────────────────────────────
-_UUID_RE = re.compile(r"_([0-9a-f]{8})(?:\.[^.]+)?$", re.IGNORECASE)
+_UUID_RE = re.compile(r"_([0-9a-f]{8})(?:_processed)?(?:\.[^.]+)?$", re.IGNORECASE)
 
 def _extract_uuid(filename: str) -> str | None:
     m = _UUID_RE.search(Path(filename).stem + "." + Path(filename).suffix)
@@ -50,7 +51,7 @@ def _extract_uuid(filename: str) -> str | None:
     return m.group(1).lower() if m else None
 
 
-# ── Core metric functions ──────────────────────────────────────────────────────
+# ── Core metric & Quality functions ────────────────────────────────────────────
 
 def _load_bgr(path: str) -> np.ndarray | None:
     """Load image as BGR uint8, stripping alpha if present."""
@@ -67,9 +68,6 @@ def _load_bgr(path: str) -> np.ndarray | None:
 def _soil_mask(bgr: np.ndarray, bg: str = "auto") -> np.ndarray:
     """
     Boolean mask of non-background pixels.
-    bg='black'  → pixels brighter than near-black
-    bg='white'  → pixels darker  than near-white
-    bg='auto'   → guess from corner mean
     """
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     if bg == "auto":
@@ -143,23 +141,24 @@ def _lab_stats(bgr: np.ndarray, mask: np.ndarray) -> dict:
         "B_mean": float(px[:, 2].mean()), "B_std": float(px[:, 2].std()),
     }
 
+def _get_quality_metrics(gray: np.ndarray) -> dict:
+    """Measures sharpness and information content (entropy)."""
+    laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+    entropy = shannon_entropy(gray)
+    return {"sharpness": float(laplacian_var), "entropy": float(entropy)}
+
+def _count_keypoints(gray: np.ndarray) -> int:
+    """Uses ORB to count distinct structural features (corners/edges)."""
+    orb = cv2.ORB_create()
+    keypoints = orb.detect(gray, None)
+    return len(keypoints)
+
 
 # ── Main class ─────────────────────────────────────────────────────────────────
 
 class PipelineSimilarityAnalyzer:
     """
     Compare AgriCapture vs TerraScan preprocessed image folders.
-
-    Parameters
-    ----------
-    agricapture_dir : str | Path
-        Folder containing AgriCapture output images.
-    terrascan_dir : str | Path
-        Folder containing TerraScan output images.
-    output_csv : str | Path
-        Path for the CSV results file. Default: "similarity_results.csv".
-    resize : int
-        Resolution both images are resized to before pixel-level metrics. Default: 256.
     """
 
     SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
@@ -170,7 +169,10 @@ class PipelineSimilarityAnalyzer:
         "L_mean_ac", "L_mean_ts", "L_delta",
         "A_mean_ac", "A_mean_ts", "A_delta",
         "B_mean_ac", "B_mean_ts", "B_delta",
-        "verdict",
+        "sharpness_ac", "sharpness_ts", 
+        "entropy_ac", "entropy_ts",
+        "kp_count_ac", "kp_count_ts",
+        "similarity_verdict", "quality_winner"
     ]
 
     def __init__(
@@ -179,20 +181,31 @@ class PipelineSimilarityAnalyzer:
         terrascan_dir: str | Path,
         output_csv: str | Path = "similarity_results.csv",
         resize: int = 256,
+        visualize: bool = False
     ):
         self.agricapture_dir = Path(agricapture_dir)
         self.terrascan_dir   = Path(terrascan_dir)
         self.output_csv      = Path(output_csv)
         self.resize          = resize
+        self.visualize       = visualize
         self.results: list[dict] = []
+        
+        if self.visualize:
+            self.vis_dir = Path("visual_comparisons")
+            self.vis_dir.mkdir(exist_ok=True)
 
     # ── File discovery & matching ──────────────────────────────────────────────
 
     def _index_folder(self, folder: Path) -> dict[str, Path]:
         """Return {uuid: filepath} for all supported images in folder."""
         index = {}
-        for f in sorted(folder.iterdir()):
-            if f.suffix.lower() not in self.SUPPORTED_EXT:
+        
+        if not folder.exists():
+            print(f"  [ERROR] Directory not found: {folder}")
+            return index
+
+        for f in folder.rglob('*'):
+            if not f.is_file() or f.suffix.lower() not in self.SUPPORTED_EXT:
                 continue
             uid = _extract_uuid(f.name)
             if uid:
@@ -216,6 +229,35 @@ class PipelineSimilarityAnalyzer:
 
         return [(uid, ac_index[uid], ts_index[uid]) for uid in sorted(matched)]
 
+    # ── Visual Diff ───────────────────────────────────────────────────────────
+
+    def _generate_visual_diff(self, uuid: str, ac_r: np.ndarray, ts_r: np.ndarray, metrics: dict):
+        """Creates a side-by-side image with a difference heatmap."""
+        gray_ac = cv2.cvtColor(ac_r, cv2.COLOR_BGR2GRAY)
+        gray_ts = cv2.cvtColor(ts_r, cv2.COLOR_BGR2GRAY)
+        
+        # Calculate absolute difference
+        diff = cv2.absdiff(gray_ac, gray_ts)
+        diff_heatmap = cv2.applyColorMap(diff, cv2.COLORMAP_JET)
+
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+        
+        axes[0].imshow(cv2.cvtColor(ac_r, cv2.COLOR_BGR2RGB))
+        axes[0].set_title(f"AgriCap\nFeatures: {metrics['kp_count_ac']} | Ent: {metrics['entropy_ac']:.2f}")
+        axes[0].axis('off')
+
+        axes[1].imshow(cv2.cvtColor(ts_r, cv2.COLOR_BGR2RGB))
+        axes[1].set_title(f"TerraScan\nFeatures: {metrics['kp_count_ts']} | Ent: {metrics['entropy_ts']:.2f}")
+        axes[1].axis('off')
+
+        axes[2].imshow(cv2.cvtColor(diff_heatmap, cv2.COLOR_BGR2RGB))
+        axes[2].set_title(f"Difference Heatmap\nWinner: {metrics['quality_winner']}")
+        axes[2].axis('off')
+
+        plt.tight_layout()
+        plt.savefig(self.vis_dir / f"{uuid}_comparison.png")
+        plt.close(fig)
+
     # ── Per-pair analysis ─────────────────────────────────────────────────────
 
     def _analyze_pair(self, uuid: str, ac_path: Path, ts_path: Path) -> dict | None:
@@ -238,7 +280,7 @@ class PipelineSimilarityAnalyzer:
         if combined.sum() < 100:
             combined = np.ones((self.resize, self.resize), dtype=bool)
 
-        # ── Metrics ───────────────────────────────────────────────────────────
+        # ── Core Original Metrics ─────────────────────────────────────────────
         gray_ac = cv2.cvtColor(ac_r, cv2.COLOR_BGR2GRAY)
         gray_ts = cv2.cvtColor(ts_r, cv2.COLOR_BGR2GRAY)
 
@@ -259,17 +301,30 @@ class PipelineSimilarityAnalyzer:
         lab_ac = _lab_stats(ac_r, combined)
         lab_ts = _lab_stats(ts_r, combined)
 
-        # ── Verdict ───────────────────────────────────────────────────────────
-        if cls_cos >= 0.995 and glcm_cos >= 0.95:
-            verdict = "EQUIVALENT"
-        elif cls_cos >= 0.97:
-            verdict = "CLOSE"
-        elif cls_cos >= 0.90:
-            verdict = "MODERATE_DIVERGENCE"
-        else:
-            verdict = "HIGH_DIVERGENCE"
+        # ── New Quality & Feature Metrics ─────────────────────────────────────
+        qual_ac, qual_ts = _get_quality_metrics(gray_ac), _get_quality_metrics(gray_ts)
+        kp_ac, kp_ts = _count_keypoints(gray_ac), _count_keypoints(gray_ts)
 
-        return {
+        # ── Verdicts ──────────────────────────────────────────────────────────
+        # Similarity Verdict
+        if cls_cos >= 0.995 and glcm_cos >= 0.95:
+            sim_verdict = "EQUIVALENT"
+        elif cls_cos >= 0.97:
+            sim_verdict = "CLOSE"
+        elif cls_cos >= 0.90:
+            sim_verdict = "MODERATE_DIVERGENCE"
+        else:
+            sim_verdict = "HIGH_DIVERGENCE"
+
+        # Quality Winner Verdict
+        if qual_ts["entropy"] > qual_ac["entropy"] and kp_ts > kp_ac:
+            winner = "TerraScan (More Data)"
+        elif qual_ac["entropy"] > qual_ts["entropy"] and kp_ac > kp_ts:
+            winner = "AgriCap (TerraScan lost data)"
+        else:
+            winner = "Mixed / Unclear"
+
+        metrics = {
             "uuid": uuid,
             "agricapture_file": ac_path.name,
             "terrascan_file":   ts_path.name,
@@ -286,8 +341,20 @@ class PipelineSimilarityAnalyzer:
             "B_mean_ac": round(lab_ac["B_mean"], 2),
             "B_mean_ts": round(lab_ts["B_mean"], 2),
             "B_delta":   round(abs(lab_ac["B_mean"] - lab_ts["B_mean"]), 2),
-            "verdict": verdict,
+            "sharpness_ac": round(qual_ac["sharpness"], 2),
+            "sharpness_ts": round(qual_ts["sharpness"], 2),
+            "entropy_ac": round(qual_ac["entropy"], 4),
+            "entropy_ts": round(qual_ts["entropy"], 4),
+            "kp_count_ac": kp_ac,
+            "kp_count_ts": kp_ts,
+            "similarity_verdict": sim_verdict,
+            "quality_winner": winner,
         }
+
+        if self.visualize:
+            self._generate_visual_diff(uuid, ac_r, ts_r, metrics)
+
+        return metrics
 
     # ── Console report ────────────────────────────────────────────────────────
 
@@ -320,47 +387,53 @@ class PipelineSimilarityAnalyzer:
             print(f"    A (green-red): AC={r['A_mean_ac']:6.2f}  TS={r['A_mean_ts']:6.2f}  Δ={r['A_delta']:5.2f}")
             print(f"    B (blue-yel): AC={r['B_mean_ac']:6.2f}  TS={r['B_mean_ts']:6.2f}  Δ={r['B_delta']:5.2f}")
             print(f"  {sep}")
-            print(f"  Verdict: {r['verdict']}")
+            print(f"  Quality & Features")
+            print(f"    Entropy      : AC={r['entropy_ac']:.2f}  TS={r['entropy_ts']:.2f}")
+            print(f"    ORB Features : AC={r['kp_count_ac']}     TS={r['kp_count_ts']}")
+            print(f"  {sep}")
+            print(f"  Sim. Verdict : {r['similarity_verdict']}")
+            print(f"  Winner       : {r['quality_winner']}")
 
         # ── Aggregate summary ─────────────────────────────────────────────────
         if n > 1:
             def avg(key): return sum(r[key] for r in self.results) / n
-            verdicts = [r["verdict"] for r in self.results]
+            verdicts = [r["similarity_verdict"] for r in self.results]
+            winners = [r["quality_winner"] for r in self.results]
 
             print(f"\n{'═'*68}")
             print(f"  AGGREGATE SUMMARY  ({n} pairs)")
             print(f"{'═'*68}")
             print(f"  Avg SSIM              : {avg('ssim'):.4f}")
-            print(f"  Avg color histogram   : {avg('hist_cosine'):.4f}")
-            print(f"  Avg GLCM texture      : {avg('glcm_cosine'):.4f}")
             print(f"  Avg CLS feature vec   : {avg('cls_cosine'):.4f}")
-            print(f"  Avg L-delta           : {avg('L_delta'):.2f}")
+            print(f"  Avg ORB Features      : AC={avg('kp_count_ac'):.0f} | TS={avg('kp_count_ts'):.0f}")
             print(f"  Verdicts              : {', '.join(sorted(set(verdicts)))}")
+            print(f"  Top Winner            : {max(set(winners), key=winners.count)}")
             print(f"{'═'*68}\n")
 
     # ── CSV writer ────────────────────────────────────────────────────────────
 
     def _save_csv(self):
-        with open(self.output_csv, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=self.CSV_FIELDS)
-            writer.writeheader()
-            writer.writerows(self.results)
-        print(f"\n  ✓ Results saved → {self.output_csv.resolve()}")
+        try:
+            with open(self.output_csv, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=self.CSV_FIELDS)
+                writer.writeheader()
+                writer.writerows(self.results)
+            print(f"\n  ✓ Results saved → {self.output_csv.resolve()}")
+        except PermissionError:
+            print(f"\n  [ERROR] Permission denied: '{self.output_csv.name}'.")
+            print("  Make sure the file is not currently open in another program (like Excel) and try again.")
 
     # ── Public entry point ────────────────────────────────────────────────────
 
     def run(self) -> list[dict]:
         """
         Run the full analysis pipeline.
-
-        Returns
-        -------
-        list[dict]
-            One dict per matched pair containing all similarity metrics.
         """
         print(f"\n  AgriCapture dir : {self.agricapture_dir}")
         print(f"  TerraScan  dir  : {self.terrascan_dir}")
         print(f"  Resize          : {self.resize}×{self.resize}")
+        if self.visualize:
+            print(f"  Visuals         : Enabled (saving to {self.vis_dir}/)")
 
         pairs = self._match_pairs()
         if not pairs:
@@ -376,7 +449,7 @@ class PipelineSimilarityAnalyzer:
             elapsed = time.perf_counter() - t0
             if result:
                 self.results.append(result)
-                print(f"  [{i}/{len(pairs)}] {uuid}  CLS={result['cls_cosine']:.4f}  verdict={result['verdict']}  ({elapsed:.2f}s)")
+                print(f"  [{i}/{len(pairs)}] {uuid}  Sim={result['cls_cosine']:.4f}  Winner={result['quality_winner']}  ({elapsed:.2f}s)")
 
         self._print_report()
         self._save_csv()
@@ -410,12 +483,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Compare AgriCapture vs TerraScan preprocessed image folders."
     )
-    parser.add_argument("agricapture_dir", nargs='?', deafault=, help="Path to AgriCapture output folder")
+    parser.add_argument("agricapture_dir", nargs='?', default=None, help="Path to AgriCapture output folder")
     parser.add_argument("terrascan_dir",   help="Path to TerraScan output folder")
     parser.add_argument("--output-csv",    default="similarity_results.csv",
                         help="CSV output path (default: similarity_results.csv)")
     parser.add_argument("--resize",        type=int, default=256,
                         help="Resize resolution for pixel metrics (default: 256)")
+    parser.add_argument("--visualize",     action="store_true", 
+                        help="Generate side-by-side images with difference heatmaps")
     args = parser.parse_args()
 
     analyzer = PipelineSimilarityAnalyzer(
@@ -423,5 +498,6 @@ if __name__ == "__main__":
         terrascan_dir=args.terrascan_dir,
         output_csv=args.output_csv,
         resize=args.resize,
+        visualize=args.visualize
     )
     analyzer.run()
